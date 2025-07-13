@@ -1,0 +1,527 @@
+---
+title: "Tugas Praktek"
+author: "Golda Aurelia Silalahi"
+format: html
+editor: visual
+---
+
+## Load Library
+
+```{r}
+library(readxl)
+library(stringr)
+library(ggplot2)
+library(dplyr)
+library(caret)
+library(janitor)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(e1071)
+library(lmtest)
+library(car)
+```
+
+## UNIT 1 - Mengumpulkan Data
+
+1.  Muat file TXT ke dalam sebuah Data Frame
+
+    ```{r}
+    df <- read_excel("~/Desktop/Golda/SOAL ADS/ds 2.xlsx", sheet = "DATABASE")
+    ```
+
+    Dataset terdiri atas data penjualan mobil dengan atribut lengkap seperti spesifikasi kendaraan, fitur teknis, dimensi, harga, dan lainnya.
+
+2.  Tampilkan 5 baris pertama dan jumlah total baris/kolom
+
+    ```{r}
+    head(df, 5)
+    cat("Jumlah baris:", nrow(df), "\n")
+    cat("Jumlah kolom:", ncol(df), "\n")
+    ```
+
+    Dataset memiliki 631 baris dan 116 kolom. Baris mewakili masing-masing mobil yang diamati, sedangkan kolom merepresentasikan berbagai atribut seperti dimensi fisik, performa mesin, efisiensi bahan bakar, dan informasi pasar.
+
+3.  Identifikasi sumber data yang digunakan (format file, struktur, dan kolom yang tersedia).
+
+    ```{r}
+    str(df)
+    colnames(df)
+    ```
+
+    Struktur data menunjukkan bahwa sebagian besar kolom bertipe numerik (num) dan karakter (chr).
+
+4.  Jelaskan metode pengumpulan data yang sesuai untuk dataset ini.
+
+    Data yang digunakan dalam analisis ini berasal dari kombinasi data sekunder dan data primer. Data sekunder mencakup informasi spesifikasi mobil yang sudah tersedia dalam database internal perusahaan. Sementara itu, data primer seperti penilaian dari para ahli dan ulasan pengguna dapat diperoleh melalui metode survei. Selain itu, data tambahan seperti deskripsi produk dari situs web dapat dikumpulkan melalui penelusuran internet secara manual.
+
+## UNIT 2 - Menelaah Data
+
+1.  Analisis statistik deskriptif untuk kolom numerik (mean, median, standar deviasi, dll.).
+
+    ```{r}
+    df_turn <- df$`Turning circle (ft)`
+    summary(df_turn)
+    sd(df_turn, na.rm = TRUE)
+    ```
+
+    Variabel target Turning circle (ft) memiliki:
+
+    -   Nilai minimum: 30.8 ft
+
+    -   Nilai maksimum: 53.0 ft
+
+    -   Nilai rata-rata (mean): 39.96 ft
+
+    -   Nilai tengah (median): 38.4 ft
+
+    -   Simpangan baku (standar deviasi): 5.79 ft
+
+    -   Terdapat 148 nilai yang hilang (NA).
+
+    Angka-angka ini menunjukkan bahwa turning circle kendaraan memiliki sebaran yang cukup lebar, dengan deviasi yang cukup besar.
+
+2.  Identifikasi distribusi data untuk variabel target "Turning circle (ft)" menggunakan visualisasi (histogram/boxplot).
+
+    ```{r}
+    ggplot(df, aes(x = `Turning circle (ft)`)) +
+      geom_histogram(bins = 30, fill = "steelblue", color = "black") +
+      labs(title = "Distribusi Turning Circle (ft)", x = "Turning circle (ft)", y = "Frekuensi")
+
+    ggplot(df, aes(y = `Turning circle (ft)`)) +
+      geom_boxplot(fill = "tomato") +
+      labs(title = "Boxplot Turning Circle (ft)", y = "Turning circle (ft)")
+    ```
+
+    Histogram menunjukkan bahwa data tidak terdistribusi normal. Terdapat beberapa puncak (multimodal), dan kemungkinan distribusi ini mencerminkan kelompok kendaraan yang berbeda.
+
+    Boxplot memperlihatkan distribusi yang cukup lebar, namun tidak menunjukkan outlier secara eksplisit karena ada 148 nilai NA yang telah diabaikan dalam plot.
+
+## UNIT 3 - Memvalidasi Data
+
+1.  Tentukan apakah terdapat missing values pada kolom terkait:
+
+    -   Turning circle (ft)
+
+    -   Length (in)
+
+    -   Wheelbase (in)
+
+    -   Width (in)
+
+    -   Drive type
+
+    ```{r}
+    sapply(df[c("Turning circle (ft)", "Length (in)", "Wheelbase (in)", "Width (in)", "Drive type")],
+           function(x) sum(is.na(x)))
+    ```
+
+    Hasil menunjukkan bahwa terdapat:
+
+    -   148 missing values pada kolom Turning circle (ft)
+
+    -   2 missing values pada masing-masing kolom Length (in), Wheelbase (in), Width (in), dan Drive type.
+
+    Ini menunjukkan perlunya penanganan terhadap missing value sebelum model dibangun, terutama karena Turning circle (ft) adalah variabel target.
+
+2.  Validasi konsistensi data (misal: nilai negatif pada kolom numerik).
+
+    ```{r}
+    df %>%
+      dplyr::select(`Turning circle (ft)`, `Length (in)`, `Wheelbase (in)`, `Width (in)`) %>%
+      summarise(across(everything(), ~sum(. < 0, na.rm = TRUE)))
+    ```
+
+    Tidak ditemukan nilai negatif pada semua kolom numerik tersebut. Artinya, data tergolong konsisten secara logika (karena semua nilai ukuran mobil wajar jika positif).
+
+3.  Identifikasi outlier pada Turning circle (ft) dengan boxplot atau z-score
+
+    ```{r}
+    turning_clean <- df %>% filter(!is.na(`Turning circle (ft)`))
+    zscore <- scale(turning_clean$`Turning circle (ft)`)
+    outlier_rows <- turning_clean[abs(zscore) > 3, ]
+    cat("Jumlah outlier (Z > 3):", nrow(outlier_rows), "\n")
+    ```
+
+    Tidak ditemukan outlier berdasarkan z-score (\|Z\| \> 3) pada variabel target Turning circle (ft).
+
+    Pada tahap ini, nilai NA belum dihapus dari dataset utama (df). Filter dilakukan hanya sementara saat menghitung z-score untuk deteksi outlier. Pembersihan menyeluruh dengan na.omit() baru dilakukan pada Unit 5.
+
+    Dengan tidak adanya nilai negatif dan outlier ekstrim, data dinilai cukup bersih dan siap untuk tahap pembersihan dan pemodelan selanjutnya.
+
+4.  Validasi konsistensi data (misal: nilai negatif pada kolom numerik).
+
+5.  Identifikasi outlier pada Turning circle (ft) dengan boxplot atau z-score
+
+## UNIT 4 - Menentukan Objek Data
+
+1.  Tentukan variabel target (dependent variable): "Turning circle (ft)".
+
+    ```{r}
+    df_model <- df %>% filter(!is.na(`Turning circle (ft)`))
+    ```
+
+    Variabel yang digunakan adalah Turning circle (ft), yaitu radius putar kendaraan dalam satuan kaki. Pemilihan ini didasarkan pada tujuan utama analisis, yaitu memprediksi atau menjelaskan apa saja faktor yang memengaruhi radius putar kendaraan.
+
+2.  Pilih minimal 5 variabel independen yang diduga memengaruhi radius putar.
+
+    ```{r}
+    df_model <- df_model %>%
+      dplyr::select(`Turning circle (ft)`,
+                    `Length (in)`,
+                    `Wheelbase (in)`,
+                    `Width (in)`,
+                    `Curb weight (lbs)`,
+                    `Drive type`,
+                    `Body type`,
+                    `Engine size (l)`)
+    ```
+
+    Sebanyak 7 variabel independen dipilih karena diduga memiliki keterkaitan dengan besar radius putar, baik secara fisik maupun teknis kendaraan. Berikut alasannya:
+
+    -   Length (in) – panjang kendaraan kemungkinan berhubungan langsung dengan kemudahan manuver.
+
+    -   Wheelbase (in) – jarak antar roda depan dan belakang dapat memengaruhi seberapa besar kendaraan bisa berbelok.
+
+    -   Width (in) – lebar kendaraan juga bisa memengaruhi kebutuhan ruang saat berputar.
+
+    -   Curb weight (lbs) – berat kendaraan mungkin berpengaruh terhadap kelincahan dan kelenturan kendaraan saat bermanuver.
+
+    -   Drive type – sistem penggerak (FWD, RWD, AWD) secara mekanis bisa memengaruhi radius putar.
+
+    -   Body type – tipe bodi bisa mencerminkan struktur kendaraan (misalnya SUV vs hatchback).
+
+    -   Engine size (l) – kapasitas mesin bisa jadi proxy untuk ukuran kendaraan secara keseluruhan.
+
+## UNIT 5 - Membersihkan Data
+
+1.  Jelaskan penanganan nilai hilang (missing value) pada variabel prediktor dan target.
+
+    ```{r}
+    sapply(df_model, function(x) sum(is.na(x)))
+    ```
+
+    Hasil pemeriksaan menunjukkan bahwa dari seluruh kolom prediktor dan target, hanya variabel Curb weight (lbs) yang memiliki 41 missing values. Sementara variabel lainnya tidak memiliki missing value.
+
+2.  Lakukan pemeriksaan dengan seksama apakah ada data duplikasi, dan jelaskan langkah apa yg akan diambil untuk data yg duplikat.
+
+    ```{r}
+    df_clean <- df_model %>% na.omit()
+    ```
+
+    Untuk menangani hal ini, dilakukan penghapusan baris yang memiliki missing value (na.omit()). Langkah ini diambil karena:
+
+    -   Proporsi data yang hilang relatif kecil dibandingkan total data.
+
+    -   Tidak terdapat justifikasi atau nilai logis untuk mengisi (impute) nilai berat kendaraan secara akurat tanpa risiko bias.
+
+    ```{r}
+    df_clean <- df_clean %>% distinct()
+    ```
+
+    Setelah penghapusan missing value, dilakukan pemeriksaan dan penghapusan duplikasi baris menggunakan `distinct()`. Hal ini penting untuk memastikan bahwa tidak ada pengulangan kendaraan yang sama yang bisa mempengaruhi hasil model dan interpretasi.
+
+    ```{r}
+    cat("Jumlah baris setelah dibersihkan:", nrow(df_clean), "\n")
+    ```
+
+    Setelah kedua tahap pembersihan, data akhir terdiri dari 233 baris, yang siap digunakan dalam proses normalisasi dan pemodelan.
+
+## UNIT 6 - Mengkonstruksi Data
+
+1.  Lakukan normalisasi/standarisasi untuk kolom numerik jika diperlukan.
+
+    ```{r}
+    numeric_cols <- c("Length (in)", "Wheelbase (in)", "Width (in)", 
+                      "Curb weight (lbs)", "Engine size (l)")
+    df_norm <- df_clean
+    df_norm[numeric_cols] <- scale(df_clean[numeric_cols])
+    ```
+
+    Langkah ini bertujuan untuk menstandarkan skala variabel numerik agar memiliki mean 0 dan standar deviasi 1. Proses ini penting untuk model berbasis jarak atau yang sensitif terhadap skala, serta mempermudah interpretasi koefisien dalam regresi linear.
+
+2.  Pisahkan dataset menjadi training (80%) dan testing (20%).
+
+    ```{r}
+    set.seed(123)
+    split <- createDataPartition(df_norm$`Turning circle (ft)`, p = 0.8, list = FALSE)
+    train_data <- df_norm[split, ]
+    test_data <- df_norm[-split, ]
+    ```
+
+    Dataset kemudian dibagi menjadi:
+
+    -   Training set sebanyak 189 observasi (80%)
+
+    -   Testing set sebanyak 44 observasi (20%)
+
+    Langkah ini dilakukan agar model dapat dilatih dan kemudian diuji pada data yang tidak dilihat sebelumnya, guna mengevaluasi performa prediktif secara objektif.
+
+## UNIT 7 - Menentukan Label Data
+
+1.  Berdasarkan Turning circle (ft), buat kolom kategori maneuverability dengan aturan:
+
+    -   “Baik” jika ≤ 34 ft
+
+    -   “Sedang” jika \> 34 dan ≤ 38 ft
+
+    -   “Kurang” jika \> 38 ft
+
+    ```{r}
+    train_data$turn_label <- cut(train_data$`Turning circle (ft)`,
+                                 breaks = c(-Inf, 34, 38, Inf),
+                                 labels = c("Baik", "Sedang", "Kurang"))
+    test_data$turn_label <- cut(test_data$`Turning circle (ft)`,
+                                breaks = c(-Inf, 34, 38, Inf),
+                                labels = c("Baik", "Sedang", "Kurang"))
+    ```
+
+    Variabel `turn_label` dikonstruksi sebagai label kategori untuk menilai kelincahan kendaraan berdasarkan nilai Turning circle (ft).
+
+2.  Tampilkan proporsi masing-masing kategori.
+
+    ```{r}
+    cat("Proporsi Training:\n"); print(prop.table(table(train_data$turn_label)))
+    cat("Proporsi Testing:\n"); print(prop.table(table(test_data$turn_label)))
+    ```
+
+    Hasil Proporsi:
+
+    -   Training set: Baik: 3.7%, Sedang: 44.97%, Kurang: 51.32%
+
+    -   Testing set: Baik: 4.55%, Sedang: 47.73%, Kurang: 47.73%
+
+    Sebagian besar mobil tergolong dalam kategori "Kurang" dan "Sedang", sedangkan yang memiliki radius putar sangat kecil dan masuk kategori "Baik" cukup jarang (\~4%). Distribusi ini digunakan ketika ingin menggunakan model klasifikasi.
+
+## UNIT 8 - Membangun Model
+
+1.  Pisahkan data menjadi training (80 %) dan testing (20 %).
+
+    Data telah dibersihkan dan dinormalisasi sebelumnya (Unit 6), serta dibagi menjadi: Training set: 80% (n = 189) dan Testing set: 20% (n = 44).
+
+    ```{r}
+    train_clean <- train_data %>% janitor::clean_names()
+    test_clean <- test_data %>% janitor::clean_names()
+    ```
+
+2.  Bangun setidaknya dua model untuk memprediksi Turning circle (ft).
+
+    -   Model 1: Regresi Linear
+
+        Model ini dibangun menggunakan `fungsi lm()` dan memasukkan semua variabel numerik dan kategorikal yang dianggap relevan berdasarkan Unit 4. Model linier digunakan karena sifatnya yang interpretatif dan mudah dijelaskan.
+
+        ```{r}
+        model_lm <- lm(turning_circle_ft ~ length_in + wheelbase_in + width_in +
+                         curb_weight_lbs + engine_size_l + drive_type + body_type,
+                       data = train_clean)
+        summary(model_lm)
+        ```
+
+        Model ini menunjukkan Adjusted R² = 0.9573, yang berarti 95.73% variasi dalam Turning circle (ft) dapat dijelaskan oleh variabel-variabel independen yang digunakan.
+
+        Variabel signifikan (p \< 0.05) meliputi:
+
+        -   `width_in (p = 0.003)` : semakin lebar mobil, radius putar cenderung bertambah.
+
+        -   `drive_typefour wheel drive` dan `drive_typerear wheel drive` `(p < 0.001)` : jenis penggerak mobil memengaruhi radius putar.
+
+        -   `body_typeHatchback` dan `Truck` jenis tertentu : jenis bodi mobil juga berpengaruh.
+
+        Untuk memastikan validitas model regresi linear, dilakukan uji diagnostik berikut:
+
+        ```{r}
+        # 1. Normalitas Residual
+        par(mfrow = c(1,2))
+        plot(model_lm, which = 2)  # QQ Plot
+        hist(residuals(model_lm), breaks = 30, main = "Histogram Residual", xlab = "Residuals")
+        shapiro.test(residuals(model_lm))  # Shapiro-Wilk Test
+
+        # 2. Homoskedastisitas (Breusch-Pagan Test)
+        bptest(model_lm)
+
+        # 3. Multikolinearitas (VIF)
+        vif(model_lm)
+
+        # 4. Autokorelasi (Durbin-Watson Test)
+        dwtest(model_lm)
+
+        # 5. Plot diagnostik lengkap
+        par(mfrow = c(2,2))
+        plot(model_lm)
+        ```
+
+        -   Normalitas Residual: Histogram dan QQ plot residual menunjukkan deviasi dari distribusi normal. Uji Shapiro-Wilk menghasilkan `p-value = 3.13e-07`, sehingga H0 ditolak, disimpulkan residual tidak berdistribusi normal.
+
+        -   Homoskedastisitas (Uji Breusch-Pagan): `p-value = 0.00038` menunjukkan adanya gejala heteroskedastisitas pada residual.
+
+        -   Multikolinearitas (VIF Test): Nilai VIF untuk length_in mencapai 17.1 dan wheelbase_in 12.6, mengindikasikan adanya multikolinearitas tinggi antar prediktor. Hal ini dapat menyebabkan estimasi koefisien menjadi tidak stabil dan sensitif terhadap perubahan data.
+
+        -   Autokorelasi (Durbin-Watson Test): `DW = 1.41` dengan `p < 0.01` mengindikasikan terdapat autokorelasi positif dalam residual, yang berarti error tidak sepenuhnya independen.
+
+        -   Kesimpulan: Walaupun model regresi linear menunjukkan nilai R² yang tinggi (95,3%), beberapa asumsi penting regresi dilanggar. Karena itu, model ini kurang layak digunakan sebagai model final tanpa adanya transformasi data atau modifikasi model untuk mengatasi pelanggaran asumsi.
+
+    -   Model 2: Random Forest
+
+        Model kedua dibangun menggunakan metode Random Forest Regression, yang merupakan pendekatan ensemble machine learning non-parametrik. Model ini cocok untuk data dengan banyak variabel dan mampu menangani non-linearitas, interaksi antar fitur, serta tidak memerlukan asumsi klasik regresi.
+
+        ```{r}
+        model_rf <- randomForest(turning_circle_ft ~ ., data = train_clean, ntree = 100, importance = TRUE)
+        summary(model_rf)
+        ```
+
+        Model dilatih dengan `ntree = 100`, parameter `importance = TRUE` untuk menghitung kontribusi tiap fitur.
+
+        Hasil summary(model_rf) menunjukkan:
+
+        -   predicted: prediksi terhadap 189 data pada training set.
+
+        -   mse & rsq: menyimpan Mean Squared Error dan R-squared untuk masing-masing pohon.
+
+        -   `importance`: menyimpan nilai pentingnya masing-masing fitur, yang dapat dianalisis dengan fungsi `importance()`.
+
+        -   `type`: tipe model adalah “regression”, sesuai kebutuhan.
+
+        -   `ntree = 100` menunjukkan model terdiri dari 100 pohon keputusan.
+
+        -   `mtry`: jumlah fitur yang dipilih pada tiap split (default = sqrt(p) untuk regresi).
+
+        -   `forest`: struktur lengkap dari model random forest tersimpan dalam bentuk list.
+
+3.  Tentukan variabel mana yang paling mempengaruhi Turning circle (ft) berdasarkan:
+
+    -   Koefisien regresi
+
+    -   Feature importance
+
+    ```{r}
+    importance_rf <- importance(model_rf)
+    print(importance_rf)
+    ```
+
+    Melalui nilai %IncMSE dari fungsi importance(model_rf), variabel yang paling berpengaruh adalah:
+
+    -   `wheelbase_in` (7.72): Semakin panjang sumbu roda, semakin besar radius putarnya.
+
+    -   `body_type` (7.24): Jenis bodi sangat memengaruhi ruang manuver.
+
+    -   `length_in` (7.10) dan width_in (7.02): Dimensi utama mobil tetap krusial.
+
+    -   `curb_weight_lbs` (6.95): Bobot kendaraan sedikit memengaruhi kemampuan bermanuver.
+
+    **Kesimpulan**:
+
+    Baik model regresi linear maupun Random Forest menunjukkan bahwa dimensi mobil (panjang, lebar, wheelbase) dan jenis bodi/penggerak adalah faktor utama yang memengaruhi nilai Turning circle (ft). Random Forest menawarkan hasil yang lebih fleksibel dan bebas dari asumsi, sementara regresi linear memberikan interpretasi yang lebih eksplisit.
+
+4.  Pilih “model terbaik” berdasarkan performa pada data testing.
+
+    Akan dilakukan di unit 9.
+
+## UNIT 9 - Mengevaluasi Hasil Pemodelan
+
+1.  Hitung metrik evaluasi pada data testing untuk model terpilih:
+
+    -   MAE (Mean Absolute Error)
+
+    -   RMSE (Root Mean Squared Error)
+
+    -   R² (koefisien determinasi)
+
+    ```{r}
+    # Prediksi
+    pred_lm <- predict(model_lm, newdata = test_clean)
+    pred_rf <- predict(model_rf, newdata = test_clean)
+
+    # Evaluasi LM
+    mae_lm <- mean(abs(pred_lm - test_clean$turning_circle_ft))
+    rmse_lm <- sqrt(mean((pred_lm - test_clean$turning_circle_ft)^2))
+    r2_lm <- cor(pred_lm, test_clean$turning_circle_ft)^2
+
+    # Evaluasi RF
+    mae_rf <- mean(abs(pred_rf - test_clean$turning_circle_ft))
+    rmse_rf <- sqrt(mean((pred_rf - test_clean$turning_circle_ft)^2))
+    r2_rf <- cor(pred_rf, test_clean$turning_circle_ft)^2
+
+
+    cat("Linear Regression:\n")
+    cat("MAE:", round(mae_lm, 3), "| RMSE:", round(rmse_lm, 3), "| R²:", round(r2_lm, 3), "\n\n")
+
+    cat("Random Forest:\n")
+    cat("MAE:", round(mae_rf, 3), "| RMSE:", round(rmse_rf, 3), "| R²:", round(r2_rf, 3), "\n\n")
+    ```
+
+    Random Forest memiliki MAE & RMSE lebih rendah serta R² lebih tinggi dari Linear Regression. Artinya, Random Forest lebih akurat dalam memprediksi nilai "Turning circle (ft)" di data testing.
+
+2.  Buat plot residual dan interpretasikan apakah terdapat bias sistematis.
+
+    ```{r}
+    resid_rf <- test_clean$turning_circle_ft - pred_rf
+    plot(pred_rf, resid_rf,
+         main = "Residual Plot - Random Forest",
+         xlab = "Predicted",
+         ylab = "Residuals")
+    abline(h = 0, col = "red", lty = 2)
+    ```
+
+    Tujuan plot residual adalah untuk melihat pola kesalahan model. Idealnya, residual tersebar acak di sekitar garis nol. Pada plot Random Forest, tidak terlihat pola lengkung, tren menaik/turun, atau fan-shape (corong). Artinya, tidak ada pola sistematis yang mengindikasikan bias dan variansi residual cenderung konstan (homoskedastis). Model cukup stabil untuk berbagai nilai prediksi.
+
+3.  Buat kesimpulan tentang kekuatan dan kelemahan model.
+
+    Kekuatan Random Forest:
+
+    -   Akurasi tinggi dan performa sangat baik pada data testing.
+
+    -   Mampu menangkap interaksi non-linier antar variabel tanpa perlu transformasi eksplisit.
+
+    -   Tidak sensitif terhadap outlier atau asumsi distribusi normal.
+
+    Kelemahan Random Forest:
+
+    -   Kurang interpretatif dibandingkan Linear Regression; sulit menafsirkan hubungan antar variabel secara eksplisit.
+
+    -   Konsumsi sumber daya lebih tinggi dan membutuhkan waktu komputasi lebih lama.
+
+## Kesimpulan
+
+Dalam proyek analisis ini, telah dilakukan pemodelan prediktif terhadap radius putar kendaraan (Turning circle (ft)) menggunakan data penjualan dan spesifikasi mobil. Proses dilakukan secara terstruktur mulai dari eksplorasi, pembersihan, rekayasa fitur, hingga evaluasi model.
+
+1.  Pemilihan Variabel
+
+    Radius putar (Turning circle (ft)) dipilih sebagai variabel target karena relevan dengan efisiensi manuver kendaraan. Tujuh variabel independen dipertimbangkan karena logis secara teknis, terutama dimensi kendaraan, bobot, jenis penggerak, dan tipe bodi.
+
+2.  Pembersihan & Normalisasi Data
+
+    Dari total 631 baris data, hanya 233 baris yang layak digunakan setelah menghapus data duplikat dan missing values. Proses standarisasi diterapkan untuk menjaga kestabilan model.
+
+3.  Pembuatan Kategori Maneuverability
+
+    Data diberi label kategori (Baik, Sedang, Kurang) berdasarkan nilai radius putar. Hal ini membuka potensi untuk pengembangan model klasifikasi di masa depan.
+
+4.  Pemodelan
+
+    Dua model dibangun:
+
+    -   Regresi Linear memiliki keunggulan dalam interpretabilitas namun mengalami pelanggaran asumsi (normalitas residual, homoskedastisitas, multikolinearitas, dan autokorelasi).
+
+    -   Random Forest memberikan performa prediksi yang lebih unggul dan tahan terhadap pelanggaran asumsi, walau kurang interpretatif.
+
+5.  Evaluasi Model
+
+    Pada data testing, Random Forest menunjukkan performa terbaik:
+
+    -   MAE: 0.371 vs 0.657 (lebih rendah)
+
+    -   RMSE: 0.889 vs 0.906 (lebih rendah)
+
+    -   R²: 0.971 vs 0.970 (lebih tinggi)
+
+    Plot residual juga tidak menunjukkan pola bias sistematis, menandakan bahwa model Random Forest bekerja dengan baik di seluruh rentang prediksi.
+
+6.  Sehingga:
+
+    -   Random Forest Regression dipilih sebagai model terbaik karena:
+
+        -   Lebih akurat,
+
+        -   Tidak tergantung pada asumsi klasik regresi,
+
+        -   Stabil dalam memprediksi radius putar kendaraan berdasarkan fitur-fitur utama.
